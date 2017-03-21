@@ -1,0 +1,9 @@
+export KERNEL_DATE='2015-08-15 17:16:49' # UTC time of mempo version. This is > then max(kernel,grsec,patches) times
+export KCONFIG_NOTIMESTAMP=1                                                         
+export KBUILD_BUILD_TIMESTAMP=`date -u -d "${KERNEL_DATE}"`                    
+export DEB_BUILD_TIMESTAMP=`date -u +%s -d "${KERNEL_DATE}"`                   
+export KBUILD_BUILD_USER=root
+export KBUILD_BUILD_HOST=host
+export ROOT_DEV=FLOPPY
+export FAKETIME_TIME="$KERNEL_DATE"
+
