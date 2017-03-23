@@ -618,6 +618,8 @@ asmlinkage long sys_recvmmsg(int fd, struct mmsghdr __user *msg,
 asmlinkage long sys_socket(int, int, int);
 asmlinkage long sys_socketpair(int, int, int, int __user *);
 asmlinkage long sys_socketcall(int call, unsigned long __user *args);
+asmlinkage long sys_set_proc_local_ports(pid_t pid, int lo, int hi);
+asmlinkage long sys_get_proc_local_ports(pid_t pid, int __user *lo, int __user *hi);
 asmlinkage long sys_listen(int, int);
 asmlinkage long sys_poll(struct pollfd __user *ufds, unsigned int nfds,
 				int timeout);

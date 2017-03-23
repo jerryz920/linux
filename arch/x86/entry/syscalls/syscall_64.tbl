@@ -332,6 +332,8 @@
 323	common	userfaultfd		sys_userfaultfd
 324	common	membarrier		sys_membarrier
 325	common	mlock2			sys_mlock2
+326	common	get_proc_local_ports	sys_get_proc_local_ports
+327	common	set_proc_local_ports	sys_set_proc_local_ports
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact

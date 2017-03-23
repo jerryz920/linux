@@ -1771,6 +1771,13 @@ struct task_struct {
 	 */
 	unsigned long timer_slack_ns;
 	unsigned long default_timer_slack_ns;
+        
+        /*
+         * Help control client socket port usage. Only the given
+         *  range of ports will be ever used.
+         */
+        int task_port_low;
+        int task_port_high;
 
 #ifdef CONFIG_KASAN
 	unsigned int kasan_depth;

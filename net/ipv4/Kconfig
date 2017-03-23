@@ -11,6 +11,13 @@ config IP_MULTICAST
 	  information about the MBONE is on the WWW at
 	  <http://www.savetz.com/mbone/>. For most people, it's safe to say N.
 
+config IP_PER_PROCESS_LOCAL_PORT
+	bool "IP: per process local ports"
+	help
+	  Support for client side level 4 port management. It allows setting
+	  a range of client ports for sockets which are automatically bind on.
+	  Explicit bind call will override the setting.
+
 config IP_ADVANCED_ROUTER
 	bool "IP: advanced router"
 	---help---

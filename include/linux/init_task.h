@@ -230,6 +230,8 @@ extern struct task_group root_task_group;
 	.signal		= &init_signals,				\
 	.sighand	= &init_sighand,				\
 	.nsproxy	= &init_nsproxy,				\
+        .task_port_low  = 0,                                            \
+        .task_port_high  = 65536,                                       \
 	.pending	= {						\
 		.list = LIST_HEAD_INIT(tsk.pending.list),		\
 		.signal = {{0}}},					\
