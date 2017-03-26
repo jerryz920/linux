@@ -75,6 +75,7 @@
 #include <linux/aio.h>
 #include <linux/compiler.h>
 #include <linux/sysctl.h>
+#include <linux/task_port.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -1369,6 +1370,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	p->utimescaled = p->stimescaled = 0;
 	prev_cputime_init(&p->prev_cputime);
 
+
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
 	seqlock_init(&p->vtime_seqlock);
 	p->vtime_snap = 0;
@@ -1531,6 +1533,15 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 			p->exit_signal = (clone_flags & CSIGNAL);
 		p->group_leader = p;
 		p->tgid = p->pid;
+
+#ifdef CONFIG_IP_PER_PROCESS_LOCAL_PORT
+		/*
+		 * only need to clone the list for each processs
+		 */
+		spin_lock_init(&p->port_lock);
+		if (copy_reserved_ports_from_parent(current, p))
+			goto bad_fork_cleanup_reserved_port_list;
+#endif
 	}
 
 	p->nr_dirtied = 0;
@@ -1641,6 +1652,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 bad_fork_cancel_cgroup:
 	cgroup_cancel_fork(p, cgrp_ss_priv);
+bad_fork_cleanup_reserved_port_list:
+	clear_task_reserved_port_list(p);
 bad_fork_free_pid:
 	threadgroup_change_end(current);
 	if (pid != &init_struct_pid)

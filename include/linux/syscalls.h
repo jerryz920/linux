@@ -620,6 +620,9 @@ asmlinkage long sys_socketpair(int, int, int, int __user *);
 asmlinkage long sys_socketcall(int call, unsigned long __user *args);
 asmlinkage long sys_set_proc_local_ports(pid_t pid, int lo, int hi);
 asmlinkage long sys_get_proc_local_ports(pid_t pid, int __user *lo, int __user *hi);
+asmlinkage long sys_add_proc_reserved_ports(pid_t pid, int lo, int hi);
+asmlinkage long sys_delete_proc_reserved_ports(pid_t pid, int lo, int hi);
+asmlinkage long sys_get_proc_reserved_ports(pid_t pid, int __user *ports, int maxn);
 asmlinkage long sys_listen(int, int);
 asmlinkage long sys_poll(struct pollfd __user *ufds, unsigned int nfds,
 				int timeout);

@@ -53,6 +53,7 @@
 #include <linux/oom.h>
 #include <linux/writeback.h>
 #include <linux/shm.h>
+#include <linux/task_port.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -379,6 +380,8 @@ assign_new_owner:
 	put_task_struct(c);
 }
 #endif /* CONFIG_MEMCG */
+
+
 
 /*
  * Turn us into a lazy TLB process if we
@@ -738,6 +741,7 @@ void do_exit(long code)
 		acct_process();
 	trace_sched_process_exit(tsk);
 
+        clear_task_reserved_port_list(tsk);
 	exit_sem(tsk);
 	exit_shm(tsk);
 	exit_files(tsk);

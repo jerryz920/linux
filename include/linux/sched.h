@@ -1377,6 +1377,11 @@ struct tlbflush_unmap_batch {
 	bool writable;
 };
 
+
+
+
+
+
 struct task_struct {
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	void *stack;
@@ -1771,13 +1776,20 @@ struct task_struct {
 	 */
 	unsigned long timer_slack_ns;
 	unsigned long default_timer_slack_ns;
-        
+
+#ifdef CONFIG_IP_PER_PROCESS_LOCAL_PORT
         /*
          * Help control client socket port usage. Only the given
          *  range of ports will be ever used.
          */
+	spinlock_t port_lock;
         int task_port_low;
         int task_port_high;
+
+        /* indicate whether the task_reserved ports can be updated or not */
+        int task_reserved_ports_freeze;
+        struct list_head task_reserved_ports;
+#endif
 
 #ifdef CONFIG_KASAN
 	unsigned int kasan_depth;

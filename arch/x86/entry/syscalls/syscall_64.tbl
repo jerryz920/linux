@@ -334,6 +334,9 @@
 325	common	mlock2			sys_mlock2
 326	common	get_proc_local_ports	sys_get_proc_local_ports
 327	common	set_proc_local_ports	sys_set_proc_local_ports
+328	common	get_proc_reserved_ports	sys_get_proc_reserved_ports
+329	common	add_proc_reserved_ports	sys_add_proc_reserved_ports
+330	common	delete_proc_reserved_ports	sys_delete_proc_reserved_ports
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact

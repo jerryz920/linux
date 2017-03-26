@@ -183,6 +183,17 @@ extern struct task_group root_task_group;
 # define INIT_KASAN(tsk)
 #endif
 
+#ifdef CONFIG_IP_PER_PROCESS_LOCAL_PORT
+#define INIT_TASK_LOCAL_PORT(tsk)					\
+	.port_lock	= __SPIN_LOCK_UNLOCKED(tsk.port_lock),		\
+	.task_port_low  = 0,						\
+	.task_port_high  = 65535,					\
+	.task_reserved_ports_freeze = 0,				\
+	.task_reserved_ports = LIST_HEAD_INIT(tsk.task_reserved_ports),
+#else
+#define INIT_TASK_LOCAL_PORT(tsk)
+#endif
+
 /*
  *  INIT_TASK is used to set up the first task table, touch at
  * your own risk!. Base=0, limit=0x1fffff (=2MB)
@@ -230,8 +241,6 @@ extern struct task_group root_task_group;
 	.signal		= &init_signals,				\
 	.sighand	= &init_sighand,				\
 	.nsproxy	= &init_nsproxy,				\
-        .task_port_low  = 0,                                            \
-        .task_port_high  = 65536,                                       \
 	.pending	= {						\
 		.list = LIST_HEAD_INIT(tsk.pending.list),		\
 		.signal = {{0}}},					\
@@ -252,6 +261,7 @@ extern struct task_group root_task_group;
 	INIT_PERF_EVENTS(tsk)						\
 	INIT_TRACE_IRQFLAGS						\
 	INIT_LOCKDEP							\
+        INIT_TASK_LOCAL_PORT(tsk)					\
 	INIT_FTRACE_GRAPH						\
 	INIT_TRACE_RECURSION						\
 	INIT_TASK_RCU_PREEMPT(tsk)					\

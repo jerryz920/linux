@@ -385,3 +385,6 @@
 376	i386	mlock2			sys_mlock2
 377	i386	get_proc_local_ports	sys_get_proc_local_ports
 378	i386	set_proc_local_ports	sys_set_proc_local_ports
+379	i386	get_proc_reserved_ports	sys_get_proc_reserved_ports
+380	i386	add_proc_reserved_ports	sys_add_proc_reserved_ports
+381	i386	delete_proc_reserved_ports	sys_delete_proc_reserved_ports

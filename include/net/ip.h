@@ -219,7 +219,14 @@ static inline u64 snmp_fold_field64(void __percpu *mib, int offt, size_t syncp_o
 #endif
 
 void inet_get_local_port_range(struct net *net, int *low, int *high);
+
+#ifdef CONFIG_IP_PER_PROCESS_LOCAL_PORT
 void inet_get_proc_local_port_range(int *low, int *high);
+int inet_is_proc_local_reserved_port(int port);
+#else
+#define inet_get_proc_local_port_range(low, high)
+#define inet_is_proc_local_reserved_port(port) (1)
+#endif
 
 #ifdef CONFIG_SYSCTL
 static inline int inet_is_local_reserved_port(struct net *net, int port)
