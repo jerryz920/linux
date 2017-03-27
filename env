@@ -7,4 +7,5 @@ export KBUILD_BUILD_HOST=host
 export ROOT_DEV=FLOPPY
 export FAKETIME_TIME="$KERNEL_DATE"
 export KBUILD_BUILD_VERSION=1
-
+export LOCALVERSION=""
+export BOOT2DOCKER_SRC=$GOPATH/src/github.com/boot2docker/boot2docker/

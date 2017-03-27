@@ -1534,15 +1534,15 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		p->group_leader = p;
 		p->tgid = p->pid;
 
-#ifdef CONFIG_IP_PER_PROCESS_LOCAL_PORT
-		/*
-		 * only need to clone the list for each processs
-		 */
-		spin_lock_init(&p->port_lock);
-		if (copy_reserved_ports_from_parent(current, p))
-			goto bad_fork_cleanup_reserved_port_list;
-#endif
 	}
+#ifdef CONFIG_IP_PER_PROCESS_LOCAL_PORT
+	/*
+	 * only need to clone the list for each processs
+	 */
+	spin_lock_init(&p->port_lock);
+	if (copy_reserved_ports_from_parent(current->group_leader, p))
+		goto bad_fork_cleanup_reserved_port_list;
+#endif
 
 	p->nr_dirtied = 0;
 	p->nr_dirtied_pause = 128 >> (PAGE_SHIFT - 10);

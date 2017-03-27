@@ -24,10 +24,12 @@
 void clear_task_reserved_port_list(struct task_struct *tsk)
 {
 	struct task_reserved_port_pair *p = NULL, *next; 
-	struct list_head to_free;
+	struct list_head to_free = LIST_HEAD_INIT(to_free);
 	if (tsk->group_leader == tsk) {
 		spin_lock(&tsk->port_lock);
-		to_free = tsk->task_reserved_ports;
+		/* we just move the old list to a new list then we can unlock */
+		list_cut_position(&to_free, &tsk->task_reserved_ports,
+				tsk->task_reserved_ports.prev);
 		INIT_LIST_HEAD(&tsk->task_reserved_ports);
 		tsk->task_reserved_ports_freeze = 1;
 		/* locking does have effect of wmb */
@@ -50,8 +52,16 @@ int copy_reserved_ports_from_parent(struct task_struct *parent, struct task_stru
 	int error = 0;
 	struct task_reserved_port_pair *p, *new;
 
-	spin_lock(&parent->port_lock);
+	/*
+	 *	when we are cloning a thread, we don't need to copy the list.
+	 *	But we still want to initialize the list just for defensive programming.
+	 */
 	INIT_LIST_HEAD(&child->task_reserved_ports);
+	if (parent->group_leader == child->group_leader) {
+		return error;
+	}
+
+	spin_lock(&parent->port_lock);
 	list_for_each_entry(p, &parent->task_reserved_ports, list) {
 		spin_unlock(&parent->port_lock);
 		/*
@@ -63,6 +73,8 @@ int copy_reserved_ports_from_parent(struct task_struct *parent, struct task_stru
 			error = -ENOMEM;
 			break;
 		}
+		new->high = p->high;
+		new->low = p->low;
 		list_add_tail(&new->list, &child->task_reserved_ports);
 	}
 	spin_unlock(&parent->port_lock);
