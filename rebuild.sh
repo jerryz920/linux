@@ -1,3 +1,4 @@
+set -e
 source ./env
 echo "$KBUILD_BUILD_VERSION" > .version
 faketime "$KERNEL_DATE" make oldconfig

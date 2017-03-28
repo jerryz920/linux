@@ -623,6 +623,7 @@ asmlinkage long sys_get_proc_local_ports(pid_t pid, int __user *lo, int __user *
 asmlinkage long sys_add_proc_reserved_ports(pid_t pid, int lo, int hi);
 asmlinkage long sys_delete_proc_reserved_ports(pid_t pid, int lo, int hi);
 asmlinkage long sys_get_proc_reserved_ports(pid_t pid, int __user *ports, int maxn);
+asmlinkage long sys_clear_proc_reserved_ports(pid_t pid);
 asmlinkage long sys_listen(int, int);
 asmlinkage long sys_poll(struct pollfd __user *ufds, unsigned int nfds,
 				int timeout);

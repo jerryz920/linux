@@ -1653,7 +1653,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 bad_fork_cancel_cgroup:
 	cgroup_cancel_fork(p, cgrp_ss_priv);
 bad_fork_cleanup_reserved_port_list:
-	clear_task_reserved_port_list(p);
+	finalize_task_reserved_port_list(p);
 bad_fork_free_pid:
 	threadgroup_change_end(current);
 	if (pid != &init_struct_pid)

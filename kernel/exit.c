@@ -741,7 +741,7 @@ void do_exit(long code)
 		acct_process();
 	trace_sched_process_exit(tsk);
 
-        clear_task_reserved_port_list(tsk);
+        finalize_task_reserved_port_list(tsk);
 	exit_sem(tsk);
 	exit_shm(tsk);
 	exit_files(tsk);

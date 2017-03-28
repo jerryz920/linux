@@ -21,7 +21,7 @@
  * This is called at exit time, which always have a valid task_struct field. So just
  * reading fields like group_leader is always safe.
  */
-void clear_task_reserved_port_list(struct task_struct *tsk)
+void clear_task_reserved_port_list(struct task_struct *tsk, int finalize)
 {
 	struct task_reserved_port_pair *p = NULL, *next; 
 	struct list_head to_free = LIST_HEAD_INIT(to_free);
@@ -31,16 +31,22 @@ void clear_task_reserved_port_list(struct task_struct *tsk)
 		list_cut_position(&to_free, &tsk->task_reserved_ports,
 				tsk->task_reserved_ports.prev);
 		INIT_LIST_HEAD(&tsk->task_reserved_ports);
-		tsk->task_reserved_ports_freeze = 1;
+		tsk->task_reserved_ports_freeze = finalize;
 		/* locking does have effect of wmb */
 		spin_unlock(&tsk->port_lock);
 		list_for_each_entry_safe(p, next, &to_free, list) {
+			printk("finalize:%d clear port %d %d\n", finalize, p->low, p->high);
 			list_del(&p->list);
 			free_task_port_pair(p);
 		}
 	}
 }
-EXPORT_SYMBOL(clear_task_reserved_port_list);
+
+void finalize_task_reserved_port_list(struct task_struct *tsk)
+{
+	clear_task_reserved_port_list(tsk, 1);
+}
+EXPORT_SYMBOL(finalize_task_reserved_port_list);
 
 /*
  *	This is only called at fork time, which means both parent and child will have
@@ -75,6 +81,7 @@ int copy_reserved_ports_from_parent(struct task_struct *parent, struct task_stru
 		}
 		new->high = p->high;
 		new->low = p->low;
+		printk("copy reserved %d %d\n", p->high, p->low);
 		list_add_tail(&new->list, &child->task_reserved_ports);
 	}
 	spin_unlock(&parent->port_lock);
@@ -111,6 +118,7 @@ static int add_task_reserved_port(struct task_struct *tsk, int low, int high)
 	}
 	spin_unlock(&tsk->port_lock);
 
+	printk(KERN_INFO" add:not found reserved port %d, %d, allocating\n", low, high);
 	p = alloc_task_port_pair();
 	spin_lock(&tsk->port_lock);
 	if (unlikely(!p)) {
@@ -125,17 +133,21 @@ static int add_task_reserved_port(struct task_struct *tsk, int low, int high)
 	 *	in favor of read access. Or maybe we could use RCU to help
 	 *	it.
 	 */
+	p->low = low;
+	p->high = high;
 	if (tsk->task_reserved_ports_freeze) {
 		error = -EACCES;
 		goto out_free;
 	}
 	list_add_tail(&p->list, &tsk->task_reserved_ports);
 
-out_free:
-	free_task_port_pair(p);
 out:
 	spin_unlock(&tsk->port_lock);
 	return error;
+
+out_free:
+	free_task_port_pair(p);
+	goto out;
 }
 
 
@@ -156,8 +168,10 @@ static void delete_task_reserved_port(struct task_struct *tsk, int low, int high
 
 out:
 	spin_unlock(&tsk->port_lock);
-	if (p)
+	if (p) {
+		printk(KERN_INFO" del: found reserved port %d, %d\n", low, high);
 		free_task_port_pair(p);
+	}
 }
 
 /* tsk protected by RCU */
@@ -184,12 +198,15 @@ static int test_task_port_reserved(struct task_struct *tsk, int port)
 void inet_get_proc_local_port_range(int *low, int *high)
 {
 	struct task_struct *leader;
+	pid_t task_pid;
 	int curlow, curhigh;
 	/*
 	 *	RCU lock is enough to make sure leader is alive
 	 */
 	rcu_read_lock();
+
 	leader = current->group_leader;
+	task_pid = pid_vnr(get_task_pid(leader, PIDTYPE_PID));
 
 	/*
 	 *	TODO: this can be optimized by an atomic int64
@@ -200,9 +217,9 @@ void inet_get_proc_local_port_range(int *low, int *high)
 	spin_unlock(&leader->port_lock);
 	rcu_read_unlock();
 
-	printk("fetch process local ports: %d %d\n", curlow, curhigh);
 	if (curhigh < curlow)
 		return;
+	printk("task %u fetch process local ports: %d %d, original %d %d\n", task_pid, curlow, curhigh, *low, *high);
 
 	if (curlow > *low && curlow <= *high)
 		*low = curlow;
@@ -233,6 +250,8 @@ static int check_access_local_port_permission(struct task_struct *target)
 	const struct cred *cred = current_cred();
 	const struct cred *tcred = __task_cred(target);
 
+	printk(KERN_INFO" local port access cred: %u %u, %u %u\n", __kuid_val(cred->euid),
+			__kuid_val(cred->uid), __kuid_val(tcred->euid), __kuid_val(tcred->uid));
 	if (uid_eq(cred->euid, tcred->suid) ||
 			uid_eq(cred->euid, tcred->uid)  ||
 			uid_eq(cred->uid,  tcred->suid) ||
@@ -244,22 +263,20 @@ static int check_access_local_port_permission(struct task_struct *target)
 
 static inline struct task_struct *find_process(pid_t pid)
 {
-	struct pid *target_pid = NULL;
 	struct task_struct *p = NULL;
 
 	rcu_read_lock();
-	target_pid = find_vpid(pid);
-	if (!target_pid) {
-		goto out;
+	if (pid == 0) {
+		p = current->group_leader;
+		get_task_struct(p);
+	} else {
+		p = pid_task(find_vpid(pid), PIDTYPE_PID);
+		if (p) {
+			if (!thread_group_leader(p))
+				p = p->group_leader;
+			get_task_struct(p);
+		}
 	}
-
-	p = pid_task(target_pid, PIDTYPE_PID);
-	if (!p) {
-		goto out;
-	}
-	get_task_struct(p);
-
-out:
 	rcu_read_unlock();
 	return p;
 }
@@ -267,6 +284,7 @@ out:
 
 SYSCALL_DEFINE3(set_proc_local_ports, pid_t, pid, int, low, int, high)
 {
+	int error = 0;
 	struct task_struct *target;
 	/* validate the parameters */
 	if (low < 0 || low > 65536)
@@ -278,7 +296,7 @@ SYSCALL_DEFINE3(set_proc_local_ports, pid_t, pid, int, low, int, high)
 
 	if (target) {
 		/* check permission */
-		int error = check_access_local_port_permission(target);
+		error = check_access_local_port_permission(target);
 		if (!error) {
 			spin_lock(&target->port_lock);
 			target->task_port_low = low;
@@ -286,10 +304,11 @@ SYSCALL_DEFINE3(set_proc_local_ports, pid_t, pid, int, low, int, high)
 			spin_unlock(&target->port_lock);
 		}
 		put_task_struct(target);
-		return error;
+	} else {
+		printk("Can not find target process: %d\n", pid);
+		error = -ESRCH;
 	}
-	printk("Can not find target process: %d\n", pid);
-	return -ESRCH;
+	return error;
 }
 
 SYSCALL_DEFINE3(get_proc_local_ports, pid_t, pid, int __user *, low, int __user *, high)
@@ -347,6 +366,7 @@ static int copy_reserved_ports_to_user(struct task_struct *tsk, int __user *port
 		list_for_each_entry(p, &tsk->task_reserved_ports, list) {
 			int pair[2] = {p->low, p->high};
 			spin_unlock(&tsk->port_lock);
+			printk(KERN_INFO" found reserved port %d, %d\n", pair[0], pair[1]);
 			if (num_copied > maxn - 2) {
 				goto out_unlocked;
 			}
@@ -403,6 +423,21 @@ SYSCALL_DEFINE3(delete_proc_reserved_ports, pid_t, pid, int, low, int, high)
 		error = check_access_local_port_permission(target);
 		if (!error) {
 			delete_task_reserved_port(target, low, high);
+			put_task_struct(target);
+		}
+	}
+	return error;
+}
+
+SYSCALL_DEFINE1(clear_proc_reserved_ports, pid_t, pid)
+{
+	int error = 0;
+	struct task_struct *target = find_process(pid);
+	if (target) {
+		/* check permission */
+		error = check_access_local_port_permission(target);
+		if (!error) {
+			clear_task_reserved_port_list(target, 0);
 			put_task_struct(target);
 		}
 	}
