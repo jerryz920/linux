@@ -25,13 +25,8 @@ static inline void free_task_port_pair(struct task_reserved_port_pair *p)
 /* task reserved port management */
 #ifdef CONFIG_IP_PER_PROCESS_LOCAL_PORT
 void finalize_task_reserved_port_list(struct task_struct*);
-int copy_reserved_ports_from_parent(struct task_struct *parent, struct task_struct *child);
 #else
 static inline void finalize_task_reserved_port_list(struct task_struct*) { }
-static inline int copy_reserved_ports_from_parent(struct task_struct*, struct task_struct*)
-{
-	return 0;
-}
 #endif
 
 #endif

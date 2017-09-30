@@ -222,10 +222,16 @@ void inet_get_local_port_range(struct net *net, int *low, int *high);
 
 #ifdef CONFIG_IP_PER_PROCESS_LOCAL_PORT
 void inet_get_proc_local_port_range(int *low, int *high);
-int inet_is_proc_local_reserved_port(int port);
+int inet_is_proc_local_reserved_port(unsigned int type, int port);
+int inet_is_proc_local_reserved_port_locked(unsigned int type, int port);
+void inet_lock_ports(void);
+void inet_unlock_ports(void);
 #else
 #define inet_get_proc_local_port_range(low, high)
-#define inet_is_proc_local_reserved_port(port) (1)
+#define inet_is_proc_local_reserved_port(type, port) (0)
+#define inet_is_proc_local_reserved_port_locked(type, port) (0)
+#define inet_lock_ports(void)
+#define inet_unlock_ports(void)
 #endif
 
 #ifdef CONFIG_SYSCTL

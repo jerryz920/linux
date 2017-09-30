@@ -106,6 +106,7 @@ int inet_csk_get_port(struct sock *sk, unsigned short snum)
 	kuid_t uid = sock_i_uid(sk);
 	int attempt_half = (sk->sk_reuse == SK_CAN_REUSE) ? 1 : 0;
 
+        inet_lock_ports();
 	local_bh_disable();
 	if (!snum) {
 		int remaining, rover, low, high;
@@ -125,8 +126,11 @@ again:
 
 		smallest_size = -1;
 		do {
+
 			if (inet_is_local_reserved_port(net, rover))
 				goto next_nolock;
+                        if (inet_is_proc_local_reserved_port_locked(sk->sk_type, rover))
+                                goto next_nolock;
 			head = &hashinfo->bhash[inet_bhashfn(net, rover,
 					hashinfo->bhash_size)];
 			spin_lock(&head->lock);
@@ -249,6 +253,7 @@ fail_unlock:
 	spin_unlock(&head->lock);
 fail:
 	local_bh_enable();
+        inet_unlock_ports();
 	return ret;
 }
 EXPORT_SYMBOL_GPL(inet_csk_get_port);

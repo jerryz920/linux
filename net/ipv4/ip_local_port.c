@@ -7,8 +7,8 @@
  *      as published by the Free Software Foundation; either version
  *      2 of the License, or (at your option) any later version.
  */
-#include <linux/sched.h>
 #include <linux/types.h>
+#include <linux/sched.h>
 #include <linux/syscalls.h>
 #include <linux/errno.h>
 #include <linux/pid.h>
@@ -16,6 +16,57 @@
 #include <linux/printk.h>
 #include <linux/task_port.h>
 #include <linux/list.h>
+#include <linux/net.h>
+#include <net/inet_hashtables.h>
+#include <net/tcp.h>
+
+
+#define PORT_COUNT 65536
+
+/* #include <asm/bitops.h> */
+
+/*
+DECLARE_BITMAP(global_port_usage_map, 65536);
+
+void inet_lock_port(__u16 port) {
+  while (test_and_set_bit(port, global_port_usage_map))
+          ;
+}
+EXPORT_SYMBOL(inet_lock_port);
+
+void inet_unlock_port(__u16 port) {
+  clear_bit(port, global_port_usage_map);
+}
+EXPORT_SYMBOL(inet_unlock_port);
+
+
+
+static int check_port_range_usable(struct net *net,
+    struct hashinfo *info, __u16 s, __u16 e) {
+  __u16 i;
+  for (i = s; i != e; i++) {
+          if (test_bit(i)) {
+                  return 0;
+          }
+          head = &hashinfo->bhash[inet_bhashfn(net, i,
+                  hashinfo->bhash_size)];
+          spin_lock(&head->lock);
+          inet_bind_bucket_for_each(tb, &head->chain)
+            if (net_eq(ib_net(tb), net) && tb->port == i
+                    && tb->num_owners > 0) {
+                    spin_unlock(&head->lock);
+                    return 0;
+            }
+  }
+
+  return 1;
+}
+*/
+
+extern int __inet_check_port_range_in_use(struct net *net,
+    struct inet_hashinfo *hashinfo, const __be16 pmin, const __be16 pmax,
+    unsigned long* usage_map);
+
 
 /*
  * This is called at exit time, which always have a valid task_struct field. So just
@@ -26,6 +77,7 @@ void clear_task_reserved_port_list(struct task_struct *tsk, int finalize)
 	struct task_reserved_port_pair *p = NULL, *next; 
 	struct list_head to_free = LIST_HEAD_INIT(to_free);
 	if (tsk->group_leader == tsk) {
+
 		spin_lock(&tsk->port_lock);
 		/* we just move the old list to a new list then we can unlock */
 		list_cut_position(&to_free, &tsk->task_reserved_ports,
@@ -48,48 +100,31 @@ void finalize_task_reserved_port_list(struct task_struct *tsk)
 }
 EXPORT_SYMBOL(finalize_task_reserved_port_list);
 
-/*
- *	This is only called at fork time, which means both parent and child will have
- *	valid task_struct. No need to do rcu locking, and also child is not yet entered
- *	to pid table, so system calls trying to race it will end up in -ESRCH
- */
-int copy_reserved_ports_from_parent(struct task_struct *parent, struct task_struct *child)
+
+
+static int check_process_port_range_usage(struct task_struct *tsk,
+        int low, int high)
 {
-	int error = 0;
-	struct task_reserved_port_pair *p, *new;
+        int error = 0;
 
-	/*
-	 *	when we are cloning a thread, we don't need to copy the list.
-	 *	But we still want to initialize the list just for defensive programming.
-	 */
-	INIT_LIST_HEAD(&child->task_reserved_ports);
-	if (parent->group_leader == child->group_leader) {
-		return error;
-	}
+        /* FIXME: we only checked TCP connection here, but we could also
+         * support UDP in future with udp_table */
+        if (tsk != current)
+                task_lock(tsk);
+        if (!tsk->nsproxy) {
+                error = -ESRCH;
+                goto out;
+        }
 
-	spin_lock(&parent->port_lock);
-	list_for_each_entry(p, &parent->task_reserved_ports, list) {
-		spin_unlock(&parent->port_lock);
-		/*
-		 *	allocation may sleep.
-		 */
-		new = alloc_task_port_pair();
-		spin_lock(&parent->port_lock);
-		if (unlikely(!new)) {
-			error = -ENOMEM;
-			break;
-		}
-		new->high = p->high;
-		new->low = p->low;
-		printk("copy reserved %d %d\n", p->high, p->low);
-		list_add_tail(&new->list, &child->task_reserved_ports);
-	}
-	spin_unlock(&parent->port_lock);
-	return error;
-
+        if (__inet_check_port_range_in_use(tsk->nsproxy->net_ns,
+                    &tcp_hashinfo, low, high, NULL)) {
+                error = -EBUSY;
+        }
+out:
+        if (tsk != current)
+                task_unlock(tsk);
+        return error;
 }
-EXPORT_SYMBOL(copy_reserved_ports_from_parent);
-
 
 /*
  *	tsk must have tsk == tsk->group_leader hold. Current reserved ports
@@ -121,10 +156,18 @@ static int add_task_reserved_port(struct task_struct *tsk, int low, int high)
 	printk(KERN_INFO" add:not found reserved port %d, %d, allocating\n", low, high);
 	p = alloc_task_port_pair();
 	spin_lock(&tsk->port_lock);
+
 	if (unlikely(!p)) {
 		error = -ENOMEM;
 		goto out;
 	}
+
+        /* It is possible this port is allocated when we try to allocate 
+         * the pair.*/
+        error = check_process_port_range_usage(tsk, low, high);
+        if (error != 0) {
+                goto out_free;
+        }
 
 	/*
 	 *	Ugly workaround: it can happen the list is frozen when
@@ -146,10 +189,78 @@ out:
 	return error;
 
 out_free:
+        spin_unlock(&tsk->port_lock);
 	free_task_port_pair(p);
-	goto out;
+        return error;
 }
 
+/* try to allocate port range for given task */
+static int try_allocate_port_range(struct task_struct *tsk, int n) {
+
+        int error = 0;
+        unsigned long usable;
+        unsigned long *usage_map = kcalloc(PORT_COUNT, 1, GFP_KERNEL);
+	struct task_reserved_port_pair *p, *pnew;
+        int low = tsk->task_port_low;
+        int high = tsk->task_port_high;
+
+        if (unlikely(!usage_map)) {
+                return -ENOMEM;
+        }
+
+        pnew = alloc_task_port_pair();
+        if (unlikely(!pnew)) {
+                kfree(usage_map);
+                return -ENOMEM;
+        }
+
+        /* FIXME: tsk is the group leader of current. Locking port_lock will
+         * prevent the processes/threads in same group from accessing
+         * the critical region, but it will not prevent another process
+         * to do this. We will need a bitmap lock to enforce access
+         * on all the bits atomically */
+	spin_lock(&tsk->port_lock);
+
+        /* fill current usage map with exclusive list */
+	list_for_each_entry(p, &tsk->task_reserved_ports, list)
+                bitmap_set(usage_map, p->low, p->high - p->low + 1);
+
+        if (tsk != current)
+                task_lock(tsk);
+
+        __inet_check_port_range_in_use(tsk->nsproxy->net_ns,
+                &tcp_hashinfo, low, high, usage_map);
+
+        if (tsk != current)
+                task_unlock(tsk);
+
+        /* find first all zero region with length n */
+        usable = bitmap_find_next_zero_area(usage_map, high, low, n, 0);
+        printk("allocating port range: first zero area %lu\n", usable);
+        if (usable > high) {
+                error = -EBUSY;
+                goto out;
+        }
+
+	pnew->low = usable;
+	pnew->high = usable + n - 1;
+	if (tsk->task_reserved_ports_freeze) {
+		error = -EACCES;
+		goto out_free;
+	}
+	list_add_tail(&pnew->list, &tsk->task_reserved_ports);
+        error = usable;
+out:
+        spin_unlock(&tsk->port_lock);
+        kfree(usage_map);
+        return error;
+
+out_free:
+        spin_unlock(&tsk->port_lock);
+        kfree(usage_map);
+        free_task_port_pair(p);
+        return error;
+}
 
 static void delete_task_reserved_port(struct task_struct *tsk, int low, int high)
 {
@@ -175,21 +286,26 @@ out:
 }
 
 /* tsk protected by RCU */
+
+static int __test_task_port_reserved(struct task_struct *tsk, int port)
+{
+	struct task_reserved_port_pair *p;
+	list_for_each_entry(p, &tsk->task_reserved_ports, list) {
+		if (p->low <= port && p->high >= port) {
+                        return 1;
+		}
+	}
+	return 0;
+}
 static int test_task_port_reserved(struct task_struct *tsk, int port)
 {
 	int ret = 0;
-	struct task_reserved_port_pair *p;
 	/*
 	 *	TODO: can we optimize this to use RCU? The write
 	 *	of reserved port list is rare event.
 	 */
 	spin_lock(&tsk->port_lock);
-	list_for_each_entry(p, &tsk->task_reserved_ports, list) {
-		if (p->low <= port && p->high >= port) {
-			ret = 1;
-			break;
-		}
-	}
+        ret = __test_task_port_reserved(tsk, port);
 	spin_unlock(&tsk->port_lock);
 	return ret;
 }
@@ -208,13 +324,14 @@ void inet_get_proc_local_port_range(int *low, int *high)
 	leader = current->group_leader;
 	task_pid = pid_vnr(get_task_pid(leader, PIDTYPE_PID));
 
-	/*
-	 *	TODO: this can be optimized by an atomic int64
-	 */
-	spin_lock(&leader->port_lock);
+        /*
+         *   Note: this method is always called with port_lock
+         *   hold, so we don't need to lock here.
+         */
+	/* spin_lock(&leader->port_lock); */
 	curlow = leader->task_port_low;
 	curhigh = leader->task_port_high;
-	spin_unlock(&leader->port_lock);
+	/* spin_unlock(&leader->port_lock); */
 	rcu_read_unlock();
 
 	if (curhigh < curlow)
@@ -234,15 +351,48 @@ EXPORT_SYMBOL(inet_get_proc_local_port_range);
  *	it will be repeatably called if there are heavy usage on client ports.
  *
  */
-int inet_is_proc_local_reserved_port(int port)
+int inet_is_proc_local_reserved_port(unsigned int type, int port)
 {
-	int ret;
+	int ret = 0;
+        if (type != SOCK_STREAM)
+                return 0;
 	rcu_read_lock();
 	ret = test_task_port_reserved(current->group_leader, port);
 	rcu_read_unlock();
 	return ret;
 }
 EXPORT_SYMBOL(inet_is_proc_local_reserved_port);
+
+
+int inet_is_proc_local_reserved_port_locked(unsigned int type, int port)
+{
+        int ret = 0;
+        if (type != SOCK_STREAM)
+                return 0;
+        rcu_read_lock();
+	ret = __test_task_port_reserved(current->group_leader, port);
+	rcu_read_unlock();
+        return ret;
+}
+EXPORT_SYMBOL(inet_is_proc_local_reserved_port_locked);
+
+void inet_lock_ports()
+{
+        printk("%d inet lock\n", current->pid);
+        rcu_read_lock();
+        get_task_struct(current->group_leader);
+	rcu_read_unlock();
+	spin_lock(&current->group_leader->port_lock);
+}
+EXPORT_SYMBOL(inet_lock_ports);
+
+void inet_unlock_ports()
+{
+	spin_unlock(&current->group_leader->port_lock);
+        put_task_struct(current->group_leader);
+        printk("%d inet unlock\n", current->pid);
+}
+EXPORT_SYMBOL(inet_unlock_ports);
 
 
 static int check_access_local_port_permission(struct task_struct *target)
@@ -287,9 +437,9 @@ SYSCALL_DEFINE3(set_proc_local_ports, pid_t, pid, int, low, int, high)
 	int error = 0;
 	struct task_struct *target;
 	/* validate the parameters */
-	if (low < 0 || low > 65536)
+	if (low < 0 || low > PORT_COUNT)
 		return -EINVAL;
-	if (high < 0 || high > 65536 || high < low)
+	if (high < 0 || high > PORT_COUNT || high < low)
 		return -EINVAL;
 
 	target = find_process(pid);
@@ -299,8 +449,8 @@ SYSCALL_DEFINE3(set_proc_local_ports, pid_t, pid, int, low, int, high)
 		error = check_access_local_port_permission(target);
 		if (!error) {
 			spin_lock(&target->port_lock);
-			target->task_port_low = low;
-			target->task_port_high = high;
+                        target->task_port_low = low;
+                        target->task_port_high = high;
 			spin_unlock(&target->port_lock);
 		}
 		put_task_struct(target);
@@ -309,6 +459,47 @@ SYSCALL_DEFINE3(set_proc_local_ports, pid_t, pid, int, low, int, high)
 		error = -ESRCH;
 	}
 	return error;
+}
+
+SYSCALL_DEFINE2(alloc_proc_local_ports, pid_t, pid, int, n)
+{
+	int error = 0;
+	struct task_struct *target, *leader;
+        if (n <= 0 || n >= PORT_COUNT)
+                return -EINVAL;
+
+	target = find_process(pid);
+	if (target) {
+		/* check permission */
+		error = check_access_local_port_permission(target);
+                leader = find_process(0);
+                if (unlikely(!leader)) {
+                        printk("leader dies!\n");
+                        error = -ESRCH;
+                        put_task_struct(target);
+                        goto out;
+                }
+		if (!error) {
+                        error = try_allocate_port_range(leader, n);
+		}
+
+                /* error here is the lower bound  range */
+                if (error > 0) {
+                        printk("allocating %d ports from %d\n", n, error);
+                        spin_lock(&target->port_lock);
+                        target->task_port_low = error;
+                        target->task_port_high = error + n - 1;
+                        spin_unlock(&target->port_lock);
+                }
+		put_task_struct(target);
+                put_task_struct(leader);
+	} else {
+		printk("Can not find target process: %d\n", pid);
+		error = -ESRCH;
+	}
+
+out:
+        return error;
 }
 
 SYSCALL_DEFINE3(get_proc_local_ports, pid_t, pid, int __user *, low, int __user *, high)

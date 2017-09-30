@@ -1540,8 +1540,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	 * only need to clone the list for each processs
 	 */
 	spin_lock_init(&p->port_lock);
-	if (copy_reserved_ports_from_parent(current->group_leader, p))
-		goto bad_fork_cleanup_reserved_port_list;
+        INIT_LIST_HEAD(&p->task_reserved_ports);
+        p->task_reserved_ports_freeze = 0;
 #endif
 
 	p->nr_dirtied = 0;
@@ -1652,8 +1652,6 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 bad_fork_cancel_cgroup:
 	cgroup_cancel_fork(p, cgrp_ss_priv);
-bad_fork_cleanup_reserved_port_list:
-	finalize_task_reserved_port_list(p);
 bad_fork_free_pid:
 	threadgroup_change_end(current);
 	if (pid != &init_struct_pid)

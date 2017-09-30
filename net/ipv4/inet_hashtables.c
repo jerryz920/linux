@@ -280,6 +280,39 @@ void sock_edemux(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(sock_edemux);
 
+/* called with local bh disabled */
+int __inet_check_port_range_in_use(struct net *net,
+    struct inet_hashinfo *hashinfo, const __be16 pmin, const __be16 pmax,
+    unsigned long* usage_map)
+{
+  int ret;
+  struct inet_bind_hashbucket *head;
+  struct inet_bind_bucket *tb;
+  __be16 port;
+  for (port = pmin; port <= pmax; port++) {
+          head = &hashinfo->bhash[inet_bhashfn(net, port,
+                        hashinfo->bhash_size)];
+          spin_lock(&head->lock);
+          inet_bind_bucket_for_each(tb, &head->chain)
+                  if (net_eq(ib_net(tb), net) && tb->port == port 
+                                  && tb->num_owners > 0) {
+                          if (usage_map) {
+                                  set_bit(port, usage_map);
+                                  break; /* go to next port */
+                          } else {
+                                  spin_unlock(&head->lock);
+                                  return 1;
+                          }
+                  }
+          spin_unlock(&head->lock);
+  }
+
+  return 0;
+}
+EXPORT_SYMBOL(__inet_check_port_range_in_use);
+
+
+
 struct sock *__inet_lookup_established(struct net *net,
 				  struct inet_hashinfo *hashinfo,
 				  const __be32 saddr, const __be16 sport,
@@ -512,6 +545,7 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 	int ret;
 	struct net *net = sock_net(sk);
 
+        inet_lock_ports();
 	if (!snum) {
 		int i, remaining, low, high, port;
 		static u32 hint;
@@ -532,7 +566,8 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 			port = low + (i + offset) % remaining;
 			if (inet_is_local_reserved_port(net, port))
 				continue;
-                        if (inet_is_proc_local_reserved_port(port))
+                        /* shold hold port lock */
+                        if (inet_is_proc_local_reserved_port_locked(sk->sk_type, port))
                                 continue;
 			head = &hinfo->bhash[inet_bhashfn(net, port,
 					hinfo->bhash_size)];
@@ -569,6 +604,7 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 		next_port:
 			spin_unlock(&head->lock);
 		}
+                inet_unlock_ports();
 		local_bh_enable();
 
 		return -EADDRNOTAVAIL;
@@ -593,12 +629,17 @@ ok:
 		goto out;
 	}
 
+        if (inet_is_proc_local_reserved_port_locked(sk->sk_type, snum)) {
+                inet_unlock_ports();
+                return -EADDRNOTAVAIL;
+        }
 	head = &hinfo->bhash[inet_bhashfn(net, snum, hinfo->bhash_size)];
 	tb  = inet_csk(sk)->icsk_bind_hash;
 	spin_lock_bh(&head->lock);
 	if (sk_head(&tb->owners) == sk && !sk->sk_bind_node.next) {
 		inet_ehash_nolisten(sk, NULL);
 		spin_unlock_bh(&head->lock);
+                inet_unlock_ports();
 		return 0;
 	} else {
 		spin_unlock(&head->lock);
@@ -606,6 +647,7 @@ ok:
 		ret = check_established(death_row, sk, snum, NULL);
 out:
 		local_bh_enable();
+                inet_unlock_ports();
 		return ret;
 	}
 }
