@@ -389,3 +389,4 @@
 380	i386	add_proc_reserved_ports	sys_add_proc_reserved_ports
 381	i386	delete_proc_reserved_ports	sys_delete_proc_reserved_ports
 382	i386	clear_proc_reserved_ports	sys_clear_proc_reserved_ports
+383	i386	alloc_proc_local_ports	sys_alloc_proc_local_ports

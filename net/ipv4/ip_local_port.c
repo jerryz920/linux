@@ -397,17 +397,22 @@ EXPORT_SYMBOL(inet_unlock_ports);
 
 static int check_access_local_port_permission(struct task_struct *target)
 {
-	const struct cred *cred = current_cred();
-	const struct cred *tcred = __task_cred(target);
+        const struct cred *cred;
+        const struct cred *tcred;
+        rcu_read_lock();
+	cred = current_cred();
+	tcred = __task_cred(target);
 
 	printk(KERN_INFO" local port access cred: %u %u, %u %u\n", __kuid_val(cred->euid),
 			__kuid_val(cred->uid), __kuid_val(tcred->euid), __kuid_val(tcred->uid));
 	if (uid_eq(cred->euid, tcred->suid) ||
 			uid_eq(cred->euid, tcred->uid)  ||
 			uid_eq(cred->uid,  tcred->suid) ||
-			uid_eq(cred->uid,  tcred->uid))
+			uid_eq(cred->uid,  tcred->uid)) {
+                rcu_read_unlock();
 		return 0;
-
+        }
+        rcu_read_unlock();
 	return -EPERM;
 }
 
@@ -461,7 +466,7 @@ SYSCALL_DEFINE3(set_proc_local_ports, pid_t, pid, int, low, int, high)
 	return error;
 }
 
-SYSCALL_DEFINE2(alloc_proc_local_ports, pid_t, pid, int, n)
+SYSCALL_DEFINE3(alloc_proc_local_ports, pid_t, ppid, pid_t, pid, int, n)
 {
 	int error = 0;
 	struct task_struct *target, *leader;
@@ -472,16 +477,27 @@ SYSCALL_DEFINE2(alloc_proc_local_ports, pid_t, pid, int, n)
 	if (target) {
 		/* check permission */
 		error = check_access_local_port_permission(target);
-                leader = find_process(0);
+                if (error) {
+                        printk("error accessing %d local port!\n", pid);
+                        put_task_struct(target);
+                        goto out;
+                }
+                leader = find_process(ppid);
                 if (unlikely(!leader)) {
                         printk("leader dies!\n");
                         error = -ESRCH;
                         put_task_struct(target);
                         goto out;
                 }
+
+		error = check_access_local_port_permission(leader);
+
 		if (!error) {
+                        printk("try allocating from %d with %d ports\n", ppid, n);
                         error = try_allocate_port_range(leader, n);
-		}
+		} else {
+                        printk("error accessing proc %d local port!\n", ppid);
+                }
 
                 /* error here is the lower bound  range */
                 if (error > 0) {
