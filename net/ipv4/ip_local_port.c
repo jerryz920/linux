@@ -87,7 +87,7 @@ void clear_task_reserved_port_list(struct task_struct *tsk, int finalize)
 		/* locking does have effect of wmb */
 		spin_unlock(&tsk->port_lock);
 		list_for_each_entry_safe(p, next, &to_free, list) {
-			printk("finalize:%d clear port %d %d\n", finalize, p->low, p->high);
+			printk(KERN_INFO"finalize:%d clear port %d %d, %p\n", finalize, p->low, p->high, p);
 			list_del(&p->list);
 			free_task_port_pair(p);
 		}
@@ -98,6 +98,7 @@ void finalize_task_reserved_port_list(struct task_struct *tsk)
 {
 	clear_task_reserved_port_list(tsk, 1);
 }
+
 EXPORT_SYMBOL(finalize_task_reserved_port_list);
 
 
@@ -153,21 +154,14 @@ static int add_task_reserved_port(struct task_struct *tsk, int low, int high)
 	}
 	spin_unlock(&tsk->port_lock);
 
-	printk(KERN_INFO" add:not found reserved port %d, %d, allocating\n", low, high);
 	p = alloc_task_port_pair();
+	printk(KERN_INFO" add:not found reserved port %d, %d, allocating %p\n", low, high, p);
 	spin_lock(&tsk->port_lock);
 
 	if (unlikely(!p)) {
 		error = -ENOMEM;
 		goto out;
 	}
-
-        /* It is possible this port is allocated when we try to allocate 
-         * the pair.*/
-        error = check_process_port_range_usage(tsk, low, high);
-        if (error != 0) {
-                goto out_free;
-        }
 
 	/*
 	 *	Ugly workaround: it can happen the list is frozen when
@@ -236,7 +230,7 @@ static int try_allocate_port_range(struct task_struct *tsk, int n) {
 
         /* find first all zero region with length n */
         usable = bitmap_find_next_zero_area(usage_map, high, low, n, 0);
-        printk("allocating port range: first zero area %lu\n", usable);
+        printk("allocating port range: first zero area %lu %p\n", usable, pnew);
         if (usable > high) {
                 error = -EBUSY;
                 goto out;
@@ -264,7 +258,7 @@ out_free:
 
 static void delete_task_reserved_port(struct task_struct *tsk, int low, int high)
 {
-	struct task_reserved_port_pair *p = NULL, *next;
+	struct task_reserved_port_pair *p, *found = NULL, *next;
 	spin_lock(&tsk->port_lock);
 	/* no longer allow we to change the reserve ports list */
 	if (tsk->task_reserved_ports_freeze)
@@ -273,15 +267,15 @@ static void delete_task_reserved_port(struct task_struct *tsk, int low, int high
 		if (p->low == low && p->high == high) {
 			/* found existing ports */
 			list_del(&p->list);
+                        found = p;
 			break;
 		}
 	}
 
 out:
 	spin_unlock(&tsk->port_lock);
-	if (p) {
-		printk(KERN_INFO" del: found reserved port %d, %d\n", low, high);
-		free_task_port_pair(p);
+	if (found) {
+		free_task_port_pair(found);
 	}
 }
 
@@ -452,11 +446,16 @@ SYSCALL_DEFINE3(set_proc_local_ports, pid_t, pid, int, low, int, high)
 	if (target) {
 		/* check permission */
 		error = check_access_local_port_permission(target);
+        /* It is possible this port is allocated when we try to allocate 
+         * the pair.*/
 		if (!error) {
-			spin_lock(&target->port_lock);
-                        target->task_port_low = low;
-                        target->task_port_high = high;
-			spin_unlock(&target->port_lock);
+                        error = check_process_port_range_usage(target, low, high);
+                        if (!error) {
+			        spin_lock(&target->port_lock);
+                                target->task_port_low = low;
+                                target->task_port_high = high;
+			        spin_unlock(&target->port_lock);
+                        }
 		}
 		put_task_struct(target);
 	} else {
@@ -573,7 +572,6 @@ static int copy_reserved_ports_to_user(struct task_struct *tsk, int __user *port
 		list_for_each_entry(p, &tsk->task_reserved_ports, list) {
 			int pair[2] = {p->low, p->high};
 			spin_unlock(&tsk->port_lock);
-			printk(KERN_INFO" found reserved port %d, %d\n", pair[0], pair[1]);
 			if (num_copied > maxn - 2) {
 				goto out_unlocked;
 			}
