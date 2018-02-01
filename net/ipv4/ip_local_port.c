@@ -63,6 +63,7 @@ static int check_port_range_usable(struct net *net,
 }
 */
 
+/// need disable local bh
 extern int __inet_check_port_range_in_use(struct net *net,
     struct inet_hashinfo *hashinfo, const __be16 pmin, const __be16 pmax,
     unsigned long* usage_map);
@@ -117,10 +118,15 @@ static int check_process_port_range_usage(struct task_struct *tsk,
                 goto out;
         }
 
+        /* This function is GODDAMN SLOW that can cause uncomfortableness
+         * to RCU stall detection even. Remove it. Bring a global bit map
+         * instead for same purpose (but need to find where ports are
+         * allocated though)
         if (__inet_check_port_range_in_use(tsk->nsproxy->net_ns,
                     &tcp_hashinfo, low, high, NULL)) {
                 error = -EBUSY;
         }
+        */
 out:
         if (tsk != current)
                 task_unlock(tsk);
@@ -219,6 +225,7 @@ static int try_allocate_port_range(struct task_struct *tsk, int n) {
 	list_for_each_entry(p, &tsk->task_reserved_ports, list)
                 bitmap_set(usage_map, p->low, p->high - p->low + 1);
 
+        /*
         if (tsk != current)
                 task_lock(tsk);
 
@@ -227,6 +234,7 @@ static int try_allocate_port_range(struct task_struct *tsk, int n) {
 
         if (tsk != current)
                 task_unlock(tsk);
+                */
 
         /* find first all zero region with length n */
         usable = bitmap_find_next_zero_area(usage_map, high, low, n, 0);
