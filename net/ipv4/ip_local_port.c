@@ -602,13 +602,16 @@ SYSCALL_DEFINE3(get_proc_reserved_ports, pid_t, pid, int __user *, ports, int, m
 	struct task_struct *target = find_process(pid);
 	if (target) {
 		/* check permission */
+                printk("get %d's reserved ports\n", pid);
 		error = check_access_local_port_permission(target);
 		if (!error) {
 			/* may sleep. Here error means "num copied" */
 			error = copy_reserved_ports_to_user(target, ports, maxn);
 			put_task_struct(target);
 		}
-	}
+	} else {
+          error = -ESRCH;
+        }
 	return error;
 }
 
@@ -618,12 +621,15 @@ SYSCALL_DEFINE3(add_proc_reserved_ports, pid_t, pid, int, low, int, high)
 	struct task_struct *target = find_process(pid);
 	if (target) {
 		/* check permission */
+                printk("add %d's reserved ports %d %d\n", pid, low, high);
 		error = check_access_local_port_permission(target);
 		if (!error) {
 			error = add_task_reserved_port(target, low, high);
 			put_task_struct(target);
 		}
-	}
+	} else {
+          error = -ESRCH;
+        }
 	return error;
 }
 
@@ -633,12 +639,15 @@ SYSCALL_DEFINE3(delete_proc_reserved_ports, pid_t, pid, int, low, int, high)
 	struct task_struct *target = find_process(pid);
 	if (target) {
 		/* check permission */
+                printk("remove %d's reserved ports %d %d\n", pid, low, high);
 		error = check_access_local_port_permission(target);
 		if (!error) {
 			delete_task_reserved_port(target, low, high);
 			put_task_struct(target);
 		}
-	}
+	} else {
+          error = -ESRCH;
+        }
 	return error;
 }
 
@@ -648,11 +657,14 @@ SYSCALL_DEFINE1(clear_proc_reserved_ports, pid_t, pid)
 	struct task_struct *target = find_process(pid);
 	if (target) {
 		/* check permission */
+                printk("clear %d's reserved ports \n", pid);
 		error = check_access_local_port_permission(target);
 		if (!error) {
 			clear_task_reserved_port_list(target, 0);
 			put_task_struct(target);
 		}
-	}
+	} else {
+          error = -ESRCH;
+        }
 	return error;
 }
